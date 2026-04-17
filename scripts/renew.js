@@ -51,55 +51,27 @@ async function run() {
     console.log('[浏览器] 启动完成...');
 
     try {
-        // 1. 访问主页 (避免硬编码错误的 /login 路径导致 404)
-        console.log('[页面] 访问 Host2Play 主页...');
-        await page.goto('https://host2play.gratis/', { timeout: 60000 });
-        
-        // 2. 查找并点击截图右上角的 "Sign In" 按钮
-        console.log('[交互] 寻找并点击 Sign In 按钮...');
-        const signInBtn = page.locator('text="Sign In"').first();
-        if (await signInBtn.isVisible()) {
-            await signInBtn.click();
-        } else {
-            // 备用方案：如果主页没找到按钮，直接访问面板根目录触发登录重定向
-            console.log('[交互] 未找到 Sign In 按钮，直接访问面板触发重定向...');
-            await page.goto('https://host2play.gratis/panel', { timeout: 60000 });
-        }
-
-        // 3. 等待真实的登录框加载出来
-        console.log('[交互] 等待登录页面和输入框加载...');
-        await page.waitForSelector('input[type="email"], input[name="email"]', { timeout: 30000 });
-        
-        // 4. 填写账号密码
-        console.log('[交互] 填写账号和密码...');
-        await page.fill('input[type="email"], input[name="email"]', EMAIL);
-        await page.fill('input[type="password"], input[name="password"]', PASSWORD);
-        
-        console.log('[交互] 等待 NopeCHA 自动处理验证码并点击登录...');
-        // 给插件留足时间处理 Cloudflare 或 Captcha
-        await page.waitForTimeout(10000); 
-        await page.click('button[type="submit"], button:has-text("Login")');
-
-        // 5. 等待登录成功并跳转
-        await page.waitForNavigation({ timeout: 60000 }).catch(() => {});
-        console.log('[页面] 登录判定完成，前往目标面板...');
-
-        // 6. 访问续期目标机器面板
+        console.log('[页面] 访问公开续期链接...');
+        // 直接访问公开续期链接，跳过登录
         await page.goto(TARGET_URL, { timeout: 60000 });
-        await page.waitForTimeout(5000); // 等待页面元素加载
+        
+        console.log('[交互] 等待页面加载和 NopeCHA 自动处理验证码...');
+        // 给 NopeCHA 留出 15-20 秒的时间去搞定页面上的 reCAPTCHA
+        await page.waitForTimeout(20000); 
 
-        // 7. 点击 Renew 按钮
-        console.log('[交互] 查找并点击 Renew 按钮...');
-        const renewButton = page.locator('button:has-text("Renew"), a:has-text("Renew")').first();
+        // 查找并点击 Renew/确认 按钮
+        console.log('[交互] 查找续期按钮...');
+        const renewButton = page.locator('button:has-text("Renew"), a:has-text("Renew"), button:has-text("Confirm")').first();
+        
         if (await renewButton.isVisible()) {
             await renewButton.click();
             console.log('[成功] 续期按钮已点击！');
-            await page.waitForTimeout(3000); // 等待反馈弹窗
+            await page.waitForTimeout(5000); // 等待反馈弹窗或页面刷新
         } else {
-            console.log('[跳过] 未找到 Renew 按钮，可能尚未到续期时间。');
+            console.log('[跳过] 未找到续期按钮，可能验证码未通过，或尚未到续期时间。');
         }
 
-        // 8. 截图留存验证
+        // 截图留存验证
         await page.screenshot({ path: path.join(__dirname, 'screenshots', 'renew_done.png'), fullPage: true });
         console.log('[截图] 已保存到 screenshots/renew_done.png');
 
