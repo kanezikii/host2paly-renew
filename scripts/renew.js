@@ -59,44 +59,58 @@ async function run() {
         console.log('[页面] 访问公开续期链接...');
         await page.goto(TARGET_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
         
-        // 刚进入页面，先等5秒让 JS 运行
+        // 刚进入页面，等5秒让 JS 运行并渲染按钮
         await page.waitForTimeout(5000); 
 
-        // 检查是不是卡在 Loading 了
         const isLoading = await page.locator('text="Loading..."').isVisible();
         if (isLoading) {
             console.log('[警报] 页面卡在 Loading，遭遇后台拦截，尝试强制刷新突破...');
             await page.reload({ waitUntil: 'domcontentloaded' });
-            await page.waitForTimeout(10000); // 刷新后多等一会
+            await page.waitForTimeout(8000); 
         }
 
-        // 【抓拍 1】：看一下突破后的画面
-        await page.screenshot({ path: path.join(__dirname, 'screenshots', 'step1_after_load.png'), fullPage: true });
-        console.log('[截图] 已保存加载后画面：step1_after_load.png');
+        await page.screenshot({ path: path.join(__dirname, 'screenshots', '1_page_loaded.png'), fullPage: true });
         
-        // ... 接下来的代码保持不变 (等待 20 秒，找按钮等) ...
-
-        console.log('[交互] 等待页面加载和 NopeCHA 自动处理验证码 (等待 20 秒)...');
-        await page.waitForTimeout(20000); 
-
-        // 【新增抓拍 2】：等待 20 秒后的样子（看验证码是否通过）
-        await page.screenshot({ path: path.join(__dirname, 'screenshots', 'step2_after_wait.png'), fullPage: true });
-        console.log('[截图] 已保存等待后画面：step2_after_wait.png');
-
-        // 查找并点击 Renew/确认 按钮 (扩大搜索范围，支持更多常见词汇)
-        console.log('[交互] 查找续期按钮...');
-        const renewButton = page.locator('button, a').filter({ hasText: /Renew|Confirm|Verify|Submit|续期|确认/i }).first();
+        // ==========================================
+        // 第一步：点击蓝色的 "Renew server" 触发验证码
+        // ==========================================
+        console.log('[交互] 查找并点击第一步的 "Renew server" 按钮...');
+        const initialRenewBtn = page.locator('text="Renew server"').first();
         
-        if (await renewButton.isVisible()) {
-            await renewButton.click();
-            console.log('[成功] 续期按钮已点击！');
-            await page.waitForTimeout(5000); // 等待反馈弹窗
-            
-            // 【新增抓拍 3】：点击成功后的结果
-            await page.screenshot({ path: path.join(__dirname, 'screenshots', 'step3_success.png'), fullPage: true });
+        if (await initialRenewBtn.isVisible()) {
+            await initialRenewBtn.click();
+            console.log('[交互] 已点击 Renew server，等待验证码弹窗...');
         } else {
-            console.log('[跳过] 未找到续期按钮。可能是：1. 验证码没通过 2. 按钮不叫这些名字。');
+            console.log('[警告] 没找到初始的 Renew server 按钮，可能页面未加载完全。');
         }
+
+        // ==========================================
+        // 第二步：给 NopeCHA 充足的时间自动做题
+        // ==========================================
+        console.log('[交互] 等待 NopeCHA 识别并处理图片验证码 (给予 35 秒时间)...');
+        await page.screenshot({ path: path.join(__dirname, 'screenshots', '2_captcha_popup.png'), fullPage: true });
+        // 免费版的 NopeCHA 选图片比较慢，一定要多给点时间
+        await page.waitForTimeout(35000); 
+
+        // ==========================================
+        // 第三步：验证码完成后，点击最终的确认按钮
+        // ==========================================
+        console.log('[交互] 查找并点击弹窗中的最终确认按钮...');
+        await page.screenshot({ path: path.join(__dirname, 'screenshots', '3_after_nopecha.png'), fullPage: true });
+        
+        // 匹配 SweetAlert2 弹窗的确认按钮，或者带有 Confirm/Renew 字样的按钮
+        const finalConfirmBtn = page.locator('.swal2-confirm, button:has-text("Confirm"), button:has-text("Renew")').last();
+        
+        if (await finalConfirmBtn.isVisible()) {
+            await finalConfirmBtn.click();
+            console.log('[成功] 最终续期按钮已点击！');
+            await page.waitForTimeout(5000); // 等待后端反馈
+        } else {
+            console.log('[跳过] 未找到最终确认按钮。可能：1. NopeCHA 没做对验证码 2. 验证通过后自动提交了。');
+        }
+
+        await page.screenshot({ path: path.join(__dirname, 'screenshots', '4_final_result.png'), fullPage: true });
+        console.log('[截图] 流程结束，请查看 4_final_result.png 确认结果。');
 
     } catch (error) {
         console.error('[错误] 运行中断:', error);
