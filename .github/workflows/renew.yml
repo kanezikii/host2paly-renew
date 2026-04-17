@@ -73,6 +73,42 @@ jobs:
           xvfb-run -a node renew.js
 
       # 8. 收集截图存档，以便于你随时在 Actions 页面查看执行结果
+      # =========================
+      # 🚀 发送 Telegram 截图通知
+      # =========================
+      - name: Send Telegram Notification
+        if: always()  # 无论成功还是报错崩溃都会执行这一步
+        working-directory: scripts
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          # 检查是否配置了 TG 参数
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "[TG通知] 未配置 Telegram 变量，跳过通知。"
+            exit 0
+          fi
+
+          # 优先发送成功的最终截图
+          if [ -f "screenshots/4_final_result.png" ]; then
+            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto" \
+              -F "chat_id=${TELEGRAM_CHAT_ID}" \
+              -F "photo=@screenshots/4_final_result.png" \
+              -F "caption=✅ Host2Play 续期脚本执行完毕！请看图确认是否成功。"
+            echo "[TG通知] 成功发送最终截图！"
+          
+          # 如果没有成功截图，说明报错了，发送崩溃截图
+          elif [ -f "screenshots/error_crash.png" ]; then
+            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto" \
+              -F "chat_id=${TELEGRAM_CHAT_ID}" \
+              -F "photo=@screenshots/error_crash.png" \
+              -F "caption=❌ Host2Play 续期脚本中途崩溃！请检查截图报错。"
+            echo "[TG通知] 成功发送崩溃截图！"
+            
+          else
+            echo "[TG通知] 没有找到可发送的截图文件。"
+          fi
+          
       - name: Upload screenshots
         uses: actions/upload-artifact@v4
         if: always()
