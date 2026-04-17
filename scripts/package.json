@@ -1,0 +1,9 @@
+{
+  "name": "host2play-auto-renew",
+  "version": "1.0.0",
+  "description": "Auto renew script",
+  "main": "renew.js",
+  "dependencies": {
+    "playwright": "^1.43.0"
+  }
+}
