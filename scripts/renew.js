@@ -33,17 +33,22 @@ async function run() {
         proxyProcess = await startProxy();
     }
 
-    console.log('[Playwright] 启动中...');
+    console.log('[Playwright] 启动中，并注入伪装特征...');
     const userDataDir = '/tmp/playwright_user_data';
     
     const context = await chromium.launchPersistentContext(userDataDir, {
-        headless: false, // 必须为 false 才能加载扩展，Actions 中由 xvfb 提供虚拟显示器
+        headless: false, 
         proxy: { server: 'socks5://127.0.0.1:10808' },
+        // 伪装成正常的 Windows Chrome 用户
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        viewport: { width: 1366, height: 768 },
         args: [
             `--disable-extensions-except=${EXTENSION_PATH}`,
             `--load-extension=${EXTENSION_PATH}`,
             '--no-sandbox',
-            '--disable-setuid-sandbox'
+            '--disable-setuid-sandbox',
+            '--disable-blink-features=AutomationControlled', // 最关键的一句：擦除自动化指纹
+            '--ignore-certificate-errors'
         ]
     });
 
@@ -52,12 +57,24 @@ async function run() {
 
     try {
         console.log('[页面] 访问公开续期链接...');
-        // 访问链接
         await page.goto(TARGET_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
         
-        // 【新增抓拍 1】：刚进入页面的样子
-        await page.screenshot({ path: path.join(__dirname, 'screenshots', 'step1_init.png'), fullPage: true });
-        console.log('[截图] 已保存初始画面：step1_init.png');
+        // 刚进入页面，先等5秒让 JS 运行
+        await page.waitForTimeout(5000); 
+
+        // 检查是不是卡在 Loading 了
+        const isLoading = await page.locator('text="Loading..."').isVisible();
+        if (isLoading) {
+            console.log('[警报] 页面卡在 Loading，遭遇后台拦截，尝试强制刷新突破...');
+            await page.reload({ waitUntil: 'domcontentloaded' });
+            await page.waitForTimeout(10000); // 刷新后多等一会
+        }
+
+        // 【抓拍 1】：看一下突破后的画面
+        await page.screenshot({ path: path.join(__dirname, 'screenshots', 'step1_after_load.png'), fullPage: true });
+        console.log('[截图] 已保存加载后画面：step1_after_load.png');
+        
+        // ... 接下来的代码保持不变 (等待 20 秒，找按钮等) ...
 
         console.log('[交互] 等待页面加载和 NopeCHA 自动处理验证码 (等待 20 秒)...');
         await page.waitForTimeout(20000); 
