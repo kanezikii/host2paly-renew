@@ -52,32 +52,38 @@ async function run() {
 
     try {
         console.log('[页面] 访问公开续期链接...');
-        // 直接访问公开续期链接，跳过登录
-        await page.goto(TARGET_URL, { timeout: 60000 });
+        // 访问链接
+        await page.goto(TARGET_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
         
-        console.log('[交互] 等待页面加载和 NopeCHA 自动处理验证码...');
-        // 给 NopeCHA 留出 15-20 秒的时间去搞定页面上的 reCAPTCHA
+        // 【新增抓拍 1】：刚进入页面的样子
+        await page.screenshot({ path: path.join(__dirname, 'screenshots', 'step1_init.png'), fullPage: true });
+        console.log('[截图] 已保存初始画面：step1_init.png');
+
+        console.log('[交互] 等待页面加载和 NopeCHA 自动处理验证码 (等待 20 秒)...');
         await page.waitForTimeout(20000); 
 
-        // 查找并点击 Renew/确认 按钮
+        // 【新增抓拍 2】：等待 20 秒后的样子（看验证码是否通过）
+        await page.screenshot({ path: path.join(__dirname, 'screenshots', 'step2_after_wait.png'), fullPage: true });
+        console.log('[截图] 已保存等待后画面：step2_after_wait.png');
+
+        // 查找并点击 Renew/确认 按钮 (扩大搜索范围，支持更多常见词汇)
         console.log('[交互] 查找续期按钮...');
-        const renewButton = page.locator('button:has-text("Renew"), a:has-text("Renew"), button:has-text("Confirm")').first();
+        const renewButton = page.locator('button, a').filter({ hasText: /Renew|Confirm|Verify|Submit|续期|确认/i }).first();
         
         if (await renewButton.isVisible()) {
             await renewButton.click();
             console.log('[成功] 续期按钮已点击！');
-            await page.waitForTimeout(5000); // 等待反馈弹窗或页面刷新
+            await page.waitForTimeout(5000); // 等待反馈弹窗
+            
+            // 【新增抓拍 3】：点击成功后的结果
+            await page.screenshot({ path: path.join(__dirname, 'screenshots', 'step3_success.png'), fullPage: true });
         } else {
-            console.log('[跳过] 未找到续期按钮，可能验证码未通过，或尚未到续期时间。');
+            console.log('[跳过] 未找到续期按钮。可能是：1. 验证码没通过 2. 按钮不叫这些名字。');
         }
-
-        // 截图留存验证
-        await page.screenshot({ path: path.join(__dirname, 'screenshots', 'renew_done.png'), fullPage: true });
-        console.log('[截图] 已保存到 screenshots/renew_done.png');
 
     } catch (error) {
         console.error('[错误] 运行中断:', error);
-        await page.screenshot({ path: path.join(__dirname, 'screenshots', 'error.png'), fullPage: true });
+        await page.screenshot({ path: path.join(__dirname, 'screenshots', 'error_crash.png'), fullPage: true });
     } finally {
         await context.close();
         if (proxyProcess) proxyProcess.kill();
