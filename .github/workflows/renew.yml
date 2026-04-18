@@ -14,24 +14,20 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
-      # 1. 检出当前仓库代码
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. 安装 Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      # 3. 安装系统依赖 (带上运行虚拟桌面的 xvfb)
       - name: Install system dependencies
         working-directory: scripts
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb wget unzip curl jq p7zip-full
 
-      # 4. 安装 Hysteria2 并放入系统路径
       - name: Install Hysteria2
         working-directory: scripts
         run: |
@@ -40,14 +36,12 @@ jobs:
           sudo mv hysteria /usr/local/bin/
           hysteria version
 
-      # 5. 安装 Playwright 及相关浏览器依赖
       - name: Install Node dependencies
         working-directory: scripts
         run: |
           npm install
           npx playwright install --with-deps chromium
 
-      # 6. 下载并解压 NopeCHA 扩展
       - name: Download NopeCHA extension
         working-directory: scripts
         run: |
@@ -60,54 +54,55 @@ jobs:
           mkdir -p extensions/nopecha/unpacked
           7z x -y extensions/nopecha/chromium.zip -oextensions/nopecha/unpacked
 
-      # 7. 注入环境密文并运行核心脚本
       - name: Run renew script
         working-directory: scripts
         env:
           H2P_EMAIL: ${{ secrets.H2P_EMAIL }}
           H2P_PASSWORD: ${{ secrets.H2P_PASSWORD }}
-          RENEW_URL: ${{ secrets.RENEW_URL }}
+          RENEW_URLS: ${{ secrets.RENEW_URLS }} # 👈 注意这里改为了 RENEW_URLS
           PROXY_JSON: ${{ secrets.PROXY_JSON }}
         run: |
           mkdir -p screenshots
           xvfb-run -a node renew.js
 
-      # 8. 收集截图存档，以便于你随时在 Actions 页面查看执行结果
       # =========================
       # 🚀 发送 Telegram 截图通知
       # =========================
       - name: Send Telegram Notification
-        if: always()  # 无论成功还是报错崩溃都会执行这一步
+        if: always()
         working-directory: scripts
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          # 检查是否配置了 TG 参数
           if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
             echo "[TG通知] 未配置 Telegram 变量，跳过通知。"
             exit 0
           fi
 
-          # 优先发送成功的最终截图
-          if [ -f "screenshots/4_final_result.png" ]; then
+          shopt -s nullglob # 防止匹配不到文件时报错
+
+          # 遍历所有成功的截图
+          for img in screenshots/4_final_result_*.png; do
+            task_num=$(echo "$img" | grep -o '[0-9]\+\.png$' | grep -o '[0-9]\+')
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto" \
               -F "chat_id=${TELEGRAM_CHAT_ID}" \
-              -F "photo=@screenshots/4_final_result.png" \
-              -F "caption=✅ Host2Play 续期脚本执行完毕！请看图确认是否成功。"
-            echo "[TG通知] 成功发送最终截图！"
+              -F "photo=@$img" \
+              -F "caption=✅ 机器 [${task_num}] 续期流程执行完毕！请看图确认是否成功。"
+            echo "[TG通知] 发送成功截图: $img"
+            sleep 1 # 稍微停顿一下，防止被 TG 限制发送频率
+          done
           
-          # 如果没有成功截图，说明报错了，发送崩溃截图
-          elif [ -f "screenshots/error_crash.png" ]; then
+          # 遍历所有崩溃的截图
+          for img in screenshots/error_crash_*.png; do
+            task_num=$(echo "$img" | grep -o '[0-9]\+\.png$' | grep -o '[0-9]\+')
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto" \
               -F "chat_id=${TELEGRAM_CHAT_ID}" \
-              -F "photo=@screenshots/error_crash.png" \
-              -F "caption=❌ Host2Play 续期脚本中途崩溃！请检查截图报错。"
-            echo "[TG通知] 成功发送崩溃截图！"
-            
-          else
-            echo "[TG通知] 没有找到可发送的截图文件。"
-          fi
+              -F "photo=@$img" \
+              -F "caption=❌ 机器 [${task_num}] 续期发生崩溃！请检查截图报错。"
+            echo "[TG通知] 发送崩溃截图: $img"
+            sleep 1
+          done
           
       - name: Upload screenshots
         uses: actions/upload-artifact@v4
