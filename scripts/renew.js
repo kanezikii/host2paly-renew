@@ -71,51 +71,54 @@ async function run() {
         try {
             console.log(`[任务 ${taskNum}] 访问公开续期链接...`);
             await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-            
-            // 刚进入页面，等5秒让 JS 运行并渲染按钮
             await page.waitForTimeout(5000); 
 
             const isLoading = await page.locator('text="Loading..."').isVisible();
             if (isLoading) {
-                console.log(`[任务 ${taskNum} 警报] 页面卡在 Loading，遭遇后台拦截，尝试强制刷新突破...`);
+                console.log(`[任务 ${taskNum} 警报] 页面卡在 Loading，尝试强制刷新突破...`);
                 await page.reload({ waitUntil: 'domcontentloaded' });
                 await page.waitForTimeout(8000); 
             }
 
-            await page.screenshot({ path: path.join(__dirname, 'screenshots', `1_page_loaded_${taskNum}.png`), fullPage: true });
-            
-            // 第一步：点击蓝色的 "Renew server" 触发验证码
-            console.log(`[任务 ${taskNum} 交互] 查找并点击第一步的 "Renew server" 按钮...`);
+            // ==========================================
+            // 第一步：点击蓝色的 "Renew server"
+            // ==========================================
+            console.log(`[任务 ${taskNum} 交互] 查找并点击蓝色的 "Renew server" 按钮...`);
             const initialRenewBtn = page.locator('text="Renew server"').first();
             
             if (await initialRenewBtn.isVisible()) {
                 await initialRenewBtn.click();
-                console.log(`[任务 ${taskNum} 交互] 已点击 Renew server，等待验证码弹窗...`);
             } else {
-                console.log(`[任务 ${taskNum} 警告] 没找到初始的 Renew server 按钮，可能页面未加载完全。`);
+                console.log(`[任务 ${taskNum} 警告] 没找到蓝色的 Renew server 按钮。`);
             }
 
-            // 第二步：给 NopeCHA 充足的时间自动做题
-            console.log(`[任务 ${taskNum} 交互] 等待 NopeCHA 识别并处理图片验证码 (给予 35 秒时间)...`);
-            await page.screenshot({ path: path.join(__dirname, 'screenshots', `2_captcha_popup_${taskNum}.png`), fullPage: true });
-            await page.waitForTimeout(35000); 
+            // 给弹窗留 2 秒钟的动画加载时间
+            await page.waitForTimeout(2000);
 
-            // 第三步：验证码完成后，点击最终的确认按钮
-            console.log(`[任务 ${taskNum} 交互] 查找并点击弹窗中的最终确认按钮...`);
-            await page.screenshot({ path: path.join(__dirname, 'screenshots', `3_after_nopecha_${taskNum}.png`), fullPage: true });
+            // ==========================================
+            // 第二步：点击弹窗里的紫色 "Renew" 按钮，正式唤醒验证码
+            // ==========================================
+            console.log(`[任务 ${taskNum} 交互] 查找二次确认的紫色 Renew 按钮...`);
+            // 使用精准匹配文本 "Renew"，避免点错
+            const modalRenewBtn = page.locator('button:text-is("Renew")').first();
             
-            const finalConfirmBtn = page.locator('.swal2-confirm, button:has-text("Confirm"), button:has-text("Renew")').last();
-            
-            if (await finalConfirmBtn.isVisible()) {
-                await finalConfirmBtn.click();
-                console.log(`[任务 ${taskNum} 成功] 最终续期按钮已点击！`);
-                await page.waitForTimeout(5000); // 等待后端反馈
+            if (await modalRenewBtn.isVisible()) {
+                await modalRenewBtn.click();
+                console.log(`[任务 ${taskNum} 交互] 已点击紫色 Renew，验证码正式弹出！`);
             } else {
-                console.log(`[任务 ${taskNum} 跳过] 未找到最终确认按钮。可能：1. NopeCHA没做对验证码 2. 验证通过后自动提交了。`);
+                console.log(`[任务 ${taskNum} 警告] 未找到紫色的 Renew 弹窗按钮。`);
             }
 
+            // ==========================================
+            // 第三步：给 NopeCHA 充足的时间疯狂做题
+            // ==========================================
+            console.log(`[任务 ${taskNum} 交互] 等待 NopeCHA 处理图片验证码 (给予 45 秒时间)...`);
+            // 此时不急着截图，让插件慢慢选斑马线和公交车
+            await page.waitForTimeout(45000); 
+
+            // 验证码通过后，网页一般会自动提交并刷新时间，我们只需拍下最终结果即可
             await page.screenshot({ path: path.join(__dirname, 'screenshots', `4_final_result_${taskNum}.png`), fullPage: true });
-            console.log(`[任务 ${taskNum} 截图] 流程结束，请查看 4_final_result_${taskNum}.png 确认结果。`);
+            console.log(`[任务 ${taskNum} 截图] 流程结束，请查看 4_final_result_${taskNum}.png 确认时间是否已刷新。`);
 
         } catch (error) {
             console.error(`[任务 ${taskNum} 错误] 运行中断:`, error);
