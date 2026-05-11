@@ -50,23 +50,24 @@ def get_server_name(page):
 import re
 
 def get_expire_time(page):
-    # 尝试原有选择器
+    # 方案 A：直接用正则暴力提取 YYYY/MM/DD HH:MM:SS 格式的绝对日期
     try:
-        ele = page.ele('#expireDate', timeout=1)
-        if ele and ele.text:
-            return ele.text.strip()
-    except Exception:
-        pass
-        
-    # 放弃抓取 "Expires in"，直接用正则从页面文本中提取绝对日期 (YYYY/MM/DD HH:MM:SS)
-    try:
-        body_text = page.ele('xpath://body').text
-        match = re.search(r'\d{4}/\d{2}/\d{2}\s\d{2}:\d{2}:\d{2}', body_text)
+        match = re.search(r'\d{4}/\d{2}/\d{2}\s\d{2}:\d{2}:\d{2}', page.html)
         if match:
             return match.group(0)
     except Exception:
         pass
         
+    # 方案 B：精准定位 "Deletes on:" 节点
+    try:
+        ele = page.ele('text:Deletes on:', timeout=1)
+        if ele:
+            text = ele.text.replace('Deletes on:', '').strip()
+            if text:
+                return text
+    except Exception:
+        pass
+
     return "未知"
 
 def capture_page_screenshot(page, file_name):
