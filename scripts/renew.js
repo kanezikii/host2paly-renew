@@ -7,7 +7,6 @@ const rawUrls = process.env.RENEW_URLS || '';
 const TARGET_URLS = rawUrls.split(/[\n,;]+/).map(u => u.trim()).filter(u => u.startsWith('http'));
 const PROXY_JSON = process.env.PROXY_JSON;
 
-// 修改点：插件路径指向解压后的 Buster 目录
 const EXTENSION_PATH = path.join(__dirname, 'extensions', 'buster', 'unpacked');
 
 async function startProxy() {
@@ -56,10 +55,9 @@ async function run() {
 
     const page = await context.newPage();
     
-    // 给 Buster 插件几秒钟初始化时间
     await page.waitForTimeout(3000);
 
-    // 关闭可能弹出的插件欢迎页
+    // 关闭插件可能弹出的欢迎页
     for (const p of context.pages()) {
         if (p !== page && p.url().includes('extension')) {
             await p.close();
@@ -81,6 +79,28 @@ async function run() {
             await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
             await page.waitForTimeout(5000); 
 
+            // ==========================================
+            // 新增：突破 Cloudflare 盾逻辑
+            // ==========================================
+            console.log(`[任务 ${taskNum} 交互] 检查是否遇到 Cloudflare 盾...`);
+            try {
+                // Cloudflare 的复选框通常嵌套在特定的 iframe 中
+                const cfIframe = page.frameLocator('iframe[title*="Cloudflare"]').first();
+                const cfCheckbox = cfIframe.locator('input[type="checkbox"], .ctp-checkbox-label').first();
+                
+                if (await cfCheckbox.isVisible({ timeout: 5000 })) {
+                    console.log(`[任务 ${taskNum} 警报] 被 Cloudflare 拦截！尝试模拟真实点击...`);
+                    await cfCheckbox.hover();
+                    await page.waitForTimeout(1000);
+                    await cfCheckbox.click();
+                    console.log(`[任务 ${taskNum} 交互] 已点击 Cloudflare 盾，等待验证通过跳转...`);
+                    // 给 Cloudflare 验证和页面重新加载留出充分时间
+                    await page.waitForTimeout(12000); 
+                }
+            } catch (e) {
+                console.log(`[任务 ${taskNum} 交互] 未检测到 Cloudflare 拦截，继续流程。`);
+            }
+
             const isLoading = await page.locator('text="Loading..."').isVisible();
             if (isLoading) {
                 console.log(`[任务 ${taskNum} 警报] 页面卡在 Loading，尝试强制刷新突破...`);
@@ -93,7 +113,7 @@ async function run() {
             if (await initialRenewBtn.isVisible()) {
                 await initialRenewBtn.click();
             } else {
-                console.log(`[任务 ${taskNum} 警告] 没找到蓝色的 Renew server 按钮。`);
+                console.log(`[任务 ${taskNum} 警告] 没找到蓝色的 Renew server 按钮，可能 Cloudflare 盾未能成功突破。`);
             }
 
             await page.waitForTimeout(2000);
@@ -108,39 +128,33 @@ async function run() {
                 console.log(`[任务 ${taskNum} 警告] 未找到紫色的 Renew 弹窗按钮。`);
             }
 
-            // ==========================================
-            // 修改点：Buster 破解逻辑 (模拟点击耳机和破解按钮)
-            // ==========================================
             console.log(`[任务 ${taskNum} 交互] 等待 reCAPTCHA 弹窗加载...`);
             await page.waitForTimeout(3000); 
 
             try {
-                // 定位到 reCAPTCHA 弹出来的那个包含图片的 iframe
                 const bframe = page.frameLocator('iframe[title*="recaptcha challenge"]');
 
-                // 1. 尝试点击左下角的“耳机”图标，切换到音频验证模式
                 const audioButton = bframe.locator('#recaptcha-audio-button');
-                await audioButton.waitFor({ state: 'visible', timeout: 10000 });
+                // 缩短超时时间：如果前面的流程没卡住，这里不应该等太久
+                await audioButton.waitFor({ state: 'visible', timeout: 6000 });
                 await audioButton.click();
                 console.log(`[任务 ${taskNum} 交互] 已切换到音频验证模式...`);
                 
                 await page.waitForTimeout(2000);
 
-                // 2. 点击 Buster 插件注入的破解按钮（图标是一个黄色小人）
                 const busterButton = bframe.locator('.help-button-holder');
                 await busterButton.waitFor({ state: 'visible', timeout: 5000 });
                 await busterButton.click();
                 console.log(`[任务 ${taskNum} 交互] 已呼叫 Buster 插件进行语音听写破解...`);
 
-                // 3. 等待语音听写和验证完成 (给予 25 秒)
                 await page.waitForTimeout(25000);
                 
             } catch (e) {
-                console.log(`[任务 ${taskNum} 警告] Buster 流程未完全执行，可能是没有弹出验证码。详情: ${e.message}`);
+                console.log(`[任务 ${taskNum} 警告] Buster 流程未执行。原因可能是：网页被 Cloudflare 彻底卡死，或者验证码未弹出。`);
             }
 
             await page.screenshot({ path: path.join(__dirname, 'screenshots', `4_final_result_${taskNum}.png`), fullPage: true });
-            console.log(`[任务 ${taskNum} 截图] 流程结束，请查看 4_final_result_${taskNum}.png 确认时间是否已刷新。`);
+            console.log(`[任务 ${taskNum} 截图] 流程结束，请查看 4_final_result_${taskNum}.png 确认最终状态。`);
 
         } catch (error) {
             console.error(`[任务 ${taskNum} 错误] 运行中断:`, error);
