@@ -47,25 +47,26 @@ def get_server_name(page):
         pass
     return "未知"
 
+import re
+
 def get_expire_time(page):
+    # 尝试原有选择器
     try:
-        ele = page.ele('#expireDate', timeout=2)
-        if ele:
+        ele = page.ele('#expireDate', timeout=1)
+        if ele and ele.text:
             return ele.text.strip()
     except Exception:
         pass
-    selectors = ['text:Expires in:', 'text:Deletes on:']
-    for selector in selectors:
-        try:
-            ele = page.ele(selector, timeout=1)
-            if ele:
-                text = (ele.text or "").strip()
-                if ":" in text:
-                    return text.split(":", 1)[1].strip()
-                if text:
-                    return text
-        except Exception:
-            pass
+        
+    # 放弃抓取 "Expires in"，直接用正则从页面文本中提取绝对日期 (YYYY/MM/DD HH:MM:SS)
+    try:
+        body_text = page.ele('xpath://body').text
+        match = re.search(r'\d{4}/\d{2}/\d{2}\s\d{2}:\d{2}:\d{2}', body_text)
+        if match:
+            return match.group(0)
+    except Exception:
+        pass
+        
     return "未知"
 
 def capture_page_screenshot(page, file_name):
