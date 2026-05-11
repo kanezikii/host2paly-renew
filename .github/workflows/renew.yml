@@ -16,10 +16,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      # =========================================
+      # 变动点：弃用 Node，改用 Python 环境
+      # =========================================
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          node-version: 20
+          python-version: "3.11"
+          cache: "pip"
 
       - name: Install system dependencies
         working-directory: scripts
@@ -33,17 +37,13 @@ jobs:
           curl -L -o hysteria https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-amd64
           chmod +x hysteria
           sudo mv hysteria /usr/local/bin/
-          hysteria version
 
-      - name: Install Node dependencies
+      - name: Install Python dependencies
         working-directory: scripts
         run: |
-          npm install
-          npx playwright install --with-deps chromium
+          pip install seleniumbase requests
+          sbase install chromedriver
 
-      # =========================================
-      # 修复点：更正了 Buster 最新版本 (v3.1.3) 和实际的文件名
-      # =========================================
       - name: Download Buster extension
         working-directory: scripts
         run: |
@@ -51,19 +51,17 @@ jobs:
           wget -O extensions/buster.zip https://github.com/dessant/buster/releases/download/v3.1.3/buster_captcha_solver_for_humans-3.1.3-chrome.zip
           7z x -y extensions/buster.zip -oextensions/buster/unpacked
 
-      - name: Run renew script
+      - name: Run Python renew script
         working-directory: scripts
         env:
-          H2P_EMAIL: ${{ secrets.H2P_EMAIL }}
-          H2P_PASSWORD: ${{ secrets.H2P_PASSWORD }}
           RENEW_URLS: ${{ secrets.RENEW_URLS }}
           PROXY_JSON: ${{ secrets.PROXY_JSON }}
         run: |
           mkdir -p screenshots
-          xvfb-run -a node renew.js
+          xvfb-run -a python renew.py
 
       # =========================================
-      # 🚀 发送 Telegram 截图通知 (合并为单次相册通知)
+      # 🚀 发送 Telegram 截图通知 (合并为单次相册)
       # =========================================
       - name: Send Consolidated Telegram Notification
         if: always()
@@ -99,7 +97,6 @@ jobs:
           files = {}
           caption = f"🤖 *主机续期合并报告*\n✅ 成功任务: {len(success_files)} 个\n❌ 异常/崩溃: {len(error_files)} 个"
 
-          # 选取最多10张图片组合成相册发出
           for i, path in enumerate(all_files[:10]):
               name = f"photo{i}"
               media_item = {
@@ -112,12 +109,11 @@ jobs:
               media.append(media_item)
               files[name] = open(path, "rb")
 
-          resp = requests.post(
+          requests.post(
               f"https://api.telegram.org/bot{token}/sendMediaGroup",
               data={"chat_id": chat_id, "media": json.dumps(media)},
               files=files
           )
-          print(f"[TG通知] 合并发送完成，状态码: {resp.status_code}")
           '
           
       - name: Upload screenshots
