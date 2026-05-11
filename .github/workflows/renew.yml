@@ -41,8 +41,9 @@ jobs:
       - name: Install Python dependencies
         working-directory: scripts
         run: |
+          python -m pip install --upgrade pip
           pip install seleniumbase requests
-          sbase install chromedriver
+          python -m seleniumbase install chromedriver
 
       - name: Download Buster extension
         working-directory: scripts
