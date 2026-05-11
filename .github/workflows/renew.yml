@@ -1,127 +1,88 @@
-name: Host2Play Auto Renew
+name: Host2Play 续期
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: "30 0,8 * * *"
+    - cron: '0 0,11,22 * * *'    # 触发点: 00:00, 11:00, 22:00
+    - cron: '30 5,16 * * *'      # 触发点: 05:30, 16:30
+  workflow_dispatch:
 
 permissions:
+  actions: write
   contents: read
 
 jobs:
-  renew:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 30
+  run-renew:
+    name: 执行脚本
+    runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout code
+      - name: 拉取仓库
         uses: actions/checkout@v4
 
-      # =========================================
-      # 变动点：弃用 Node，改用 Python 环境
-      # =========================================
-      - name: Setup Python
+      - name: 配置 Python 环境
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          cache: "pip"
+          python-version: '3.10'
 
-      - name: Install system dependencies
-        working-directory: scripts
+      - name: 安装系统依赖
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb wget unzip curl jq p7zip-full
+          sudo apt-get install -y xvfb ffmpeg unzip curl
+          wget -q -O /tmp/google-chrome-stable_current_amd64.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo dpkg -i /tmp/google-chrome-stable_current_amd64.deb || sudo apt-get install -f -y
 
-      - name: Install Hysteria2
-        working-directory: scripts
-        run: |
-          curl -L -o hysteria https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-amd64
-          chmod +x hysteria
-          sudo mv hysteria /usr/local/bin/
-
-      - name: Install Python dependencies
-        working-directory: scripts
+      - name: 安装 Python 依赖
         run: |
           python -m pip install --upgrade pip
-          pip install seleniumbase requests
-          python -m seleniumbase install chromedriver
+          pip install DrissionPage xvfbwrapper requests SpeechRecognition pydub
 
-      - name: Download Buster extension
-        working-directory: scripts
-        run: |
-          mkdir -p extensions/buster
-          wget -O extensions/buster.zip https://github.com/dessant/buster/releases/download/v3.1.3/buster_captcha_solver_for_humans-3.1.3-chrome.zip
-          7z x -y extensions/buster.zip -oextensions/buster/unpacked
-
-      - name: Run Python renew script
-        working-directory: scripts
-        env:
-          RENEW_URLS: ${{ secrets.RENEW_URLS }}
-          PROXY_JSON: ${{ secrets.PROXY_JSON }}
-        run: |
-          mkdir -p screenshots
-          xvfb-run -a python renew.py
-
-      # =========================================
-      # 🚀 发送 Telegram 截图通知 (合并为单次相册)
-      # =========================================
-      - name: Send Consolidated Telegram Notification
-        if: always()
-        working-directory: scripts
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
-            echo "[TG通知] 未配置 Telegram 变量，跳过通知。"
-            exit 0
-          fi
-
-          python3 -c '
-          import os, requests, glob, json
-
-          token = os.environ.get("TELEGRAM_BOT_TOKEN")
-          chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-
-          success_files = glob.glob("screenshots/4_final_result_*.png")
-          error_files = glob.glob("screenshots/error_crash_*.png")
-          all_files = success_files + error_files
-
-          if not all_files:
-              requests.post(f"https://api.telegram.org/bot{token}/sendMessage", data={
-                  "chat_id": chat_id, 
-                  "text": "🤖 *机器续期通知*\n任务已运行，但未生成任何截图。",
-                  "parse_mode": "Markdown"
-              })
-              exit(0)
-
-          media = []
-          files = {}
-          caption = f"🤖 *主机续期合并报告*\n✅ 成功任务: {len(success_files)} 个\n❌ 异常/崩溃: {len(error_files)} 个"
-
-          for i, path in enumerate(all_files[:10]):
-              name = f"photo{i}"
-              media_item = {
-                  "type": "photo",
-                  "media": f"attach://{name}"
-              }
-              if i == 0:
-                  media_item["caption"] = caption
-                  media_item["parse_mode"] = "Markdown"
-              media.append(media_item)
-              files[name] = open(path, "rb")
-
-          requests.post(
-              f"https://api.telegram.org/bot{token}/sendMediaGroup",
-              data={"chat_id": chat_id, "media": json.dumps(media)},
-              files=files
-          )
-          '
-          
-      - name: Upload screenshots
-        uses: actions/upload-artifact@v4
-        if: always()
+      - name: 启用 WARP 网络
+        uses: fscarmen/warp-on-actions@v1.3
         with:
-          name: screenshots
-          path: scripts/screenshots/**
-          if-no-files-found: warn
-          compression-level: 6
+          stack: dual
+          mode: client
+
+      - name: 修复 DNS
+        run: |
+          echo "[INFO] 停用 systemd-resolved，设置公共 DNS..."
+          sudo systemctl stop systemd-resolved 2>/dev/null || true
+          sudo systemctl disable systemd-resolved 2>/dev/null || true
+
+          sudo rm -f /etc/resolv.conf
+          echo -e "nameserver 1.1.1.1\nnameserver 8.8.8.8\nnameserver 1.0.0.1" | sudo tee /etc/resolv.conf
+
+          sleep 2
+
+          echo "[INFO] DNS 测试:"
+          nslookup host2play.gratis 1.1.1.1 || echo "[WARN] 解析失败"
+
+          echo ""
+          echo "[INFO] 当前出口 IP:"
+          curl -s --max-time 10 https://api.ipify.org && echo
+          echo "[INFO] WARP Trace:"
+          curl -s --max-time 10 https://www.cloudflare.com/cdn-cgi/trace | grep -E 'ip=|warp=|loc=' || true
+
+      - name: 执行续订
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python main.py
+
+      - name: 上传截图
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-${{ github.run_number }}
+          path: output/screenshots/*.png
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: 清理历史运行记录
+        if: always()
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          delete_workflow_pattern: ${{ github.workflow }}
+          retain_days: 0
+          keep_minimum_runs: 2
