@@ -3,7 +3,6 @@ name: Host2Play Auto Renew
 on:
   workflow_dispatch:
   schedule:
-    # 每天 0:30 / 8:30 UTC 运行
     - cron: "30 0,8 * * *"
 
 permissions:
@@ -59,16 +58,16 @@ jobs:
         env:
           H2P_EMAIL: ${{ secrets.H2P_EMAIL }}
           H2P_PASSWORD: ${{ secrets.H2P_PASSWORD }}
-          RENEW_URLS: ${{ secrets.RENEW_URLS }} # 👈 注意这里改为了 RENEW_URLS
+          RENEW_URLS: ${{ secrets.RENEW_URLS }}
           PROXY_JSON: ${{ secrets.PROXY_JSON }}
         run: |
           mkdir -p screenshots
           xvfb-run -a node renew.js
 
       # =========================
-      # 🚀 发送 Telegram 截图通知
+      # 🚀 发送 Telegram 截图通知 (合并为单次通知)
       # =========================
-      - name: Send Telegram Notification
+      - name: Send Consolidated Telegram Notification
         if: always()
         working-directory: scripts
         env:
@@ -80,29 +79,48 @@ jobs:
             exit 0
           fi
 
-          shopt -s nullglob # 防止匹配不到文件时报错
+          python3 -c '
+          import os, requests, glob, json
 
-          # 遍历所有成功的截图
-          for img in screenshots/4_final_result_*.png; do
-            task_num=$(echo "$img" | grep -o '[0-9]\+\.png$' | grep -o '[0-9]\+')
-            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto" \
-              -F "chat_id=${TELEGRAM_CHAT_ID}" \
-              -F "photo=@$img" \
-              -F "caption=✅ 机器 [${task_num}] 续期流程执行完毕！请看图确认是否成功。"
-            echo "[TG通知] 发送成功截图: $img"
-            sleep 1 # 稍微停顿一下，防止被 TG 限制发送频率
-          done
-          
-          # 遍历所有崩溃的截图
-          for img in screenshots/error_crash_*.png; do
-            task_num=$(echo "$img" | grep -o '[0-9]\+\.png$' | grep -o '[0-9]\+')
-            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto" \
-              -F "chat_id=${TELEGRAM_CHAT_ID}" \
-              -F "photo=@$img" \
-              -F "caption=❌ 机器 [${task_num}] 续期发生崩溃！请检查截图报错。"
-            echo "[TG通知] 发送崩溃截图: $img"
-            sleep 1
-          done
+          token = os.environ.get("TELEGRAM_BOT_TOKEN")
+          chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+
+          success_files = glob.glob("screenshots/4_final_result_*.png")
+          error_files = glob.glob("screenshots/error_crash_*.png")
+          all_files = success_files + error_files
+
+          if not all_files:
+              requests.post(f"https://api.telegram.org/bot{token}/sendMessage", data={
+                  "chat_id": chat_id, 
+                  "text": "🤖 *机器续期通知*\n任务已运行，但未生成任何截图。",
+                  "parse_mode": "Markdown"
+              })
+              exit(0)
+
+          media = []
+          files = {}
+          caption = f"🤖 *主机续期合并报告*\n✅ 成功任务: {len(success_files)} 个\n❌ 异常/崩溃: {len(error_files)} 个"
+
+          # 选取最多10张图片（TG单次MediaGroup限制）
+          for i, path in enumerate(all_files[:10]):
+              name = f"photo{i}"
+              media_item = {
+                  "type": "photo",
+                  "media": f"attach://{name}"
+              }
+              if i == 0:
+                  media_item["caption"] = caption
+                  media_item["parse_mode"] = "Markdown"
+              media.append(media_item)
+              files[name] = open(path, "rb")
+
+          resp = requests.post(
+              f"https://api.telegram.org/bot{token}/sendMediaGroup",
+              data={"chat_id": chat_id, "media": json.dumps(media)},
+              files=files
+          )
+          print(f"[TG通知] 合并发送完成，状态码: {resp.status_code}")
+          '
           
       - name: Upload screenshots
         uses: actions/upload-artifact@v4
