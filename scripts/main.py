@@ -18,7 +18,7 @@ if env_urls:
     RENEW_URLS = [u.strip() for u in env_urls.replace(';', ',').replace('\n', ',').split(',') if u.strip().startswith('http')]
 else:
     RENEW_URLS = [
-        "https://host2play.gratis/server/renew?i=8d363348-bf5a-4741-a226-1c2031da952a",
+        "https://host2play.gratis/server/renew?i=8d363348-bf5a-4741-a226-1c2031da952a"
     ]
 
 MAX_RENEW_RETRIES_PER_URL = 50
