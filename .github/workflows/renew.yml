@@ -1,9 +1,6 @@
 name: Host2Play 续期
 
 on:
-  schedule:
-    - cron: '0 0,11,22 * * *'    # 触发点: 00:00, 11:00, 22:00
-    - cron: '30 5,16 * * *'      # 触发点: 05:30, 16:30
   workflow_dispatch:
 
 permissions:
@@ -27,17 +24,9 @@ jobs:
       - name: 安装系统依赖
         run: |
           sudo apt-get update
-          # 去掉那些容易报错的底层图形依赖，只保留核心工具
           sudo apt-get install -y xvfb ffmpeg unzip curl
-          
-          # 下载 Chrome 安装包
           wget -q -O /tmp/google-chrome-stable_current_amd64.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-          
-          # 尝试安装 Chrome，如果因为缺少依赖报错，不中止脚本 (|| true)
-          sudo dpkg -i /tmp/google-chrome-stable_current_amd64.deb || true
-          
-          # 让 apt 自动修复并安装刚才 Chrome 缺失的所有底层依赖！(这招最稳)
-          sudo apt-get install -f -y
+          sudo dpkg -i /tmp/google-chrome-stable_current_amd64.deb || sudo apt-get install -f -y
 
       - name: 安装 Python 依赖
         run: |
@@ -71,22 +60,17 @@ jobs:
           curl -s --max-time 10 https://www.cloudflare.com/cdn-cgi/trace | grep -E 'ip=|warp=|loc=' || true
 
       - name: 执行续订
-        working-directory: scripts
         env:
-          RENEW_URLS: ${{ secrets.RENEW_URLS }} 
-          H2P_EMAIL: ${{ secrets.H2P_EMAIL }}
-          H2P_PASSWORD: ${{ secrets.H2P_PASSWORD }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          CAPSOLVER_API_KEY: ${{ secrets.CAPSOLVER_API_KEY }}
-        run: xvfb-run -a python main.py
+        run: python main.py
 
       - name: 上传截图
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: screenshots-${{ github.run_number }}
-          path: scripts/output/screenshots/*.png  
+          path: output/screenshots/*.png
           retention-days: 7
           if-no-files-found: ignore
 
