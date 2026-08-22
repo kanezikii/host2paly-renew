@@ -21,6 +21,7 @@ except ImportError:
 # ==============================================================================
 RENEW_URLS = [
     "https://host2play.gratis/server/renew?i=a721cbfd-c963-4ec1-a1c8-e5d262da53b4",  
+    "https://host2play.gratis/server/renew?i=f0f96461-d04b-483b-8a97-e704df4fecdb",
 ]
 
 MAX_CAPTCHA = 3
