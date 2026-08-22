@@ -43,26 +43,27 @@ def log(msg, level="INFO"):
 # ==============================================================================
 # Telegram 通知
 # ==============================================================================
-def send_tg_photo(token, chat_id, photo_path, caption, parse_mode='HTML'):
+def send_tg_message(token, chat_id, text, parse_mode='HTML'):
+    """发送纯文本消息给 Telegram"""
     if not token or not chat_id:
         log("未配置 TG_BOT_TOKEN 或 TG_CHAT_ID，跳过通知。", "WARN")
         return
-    if not photo_path or not os.path.exists(photo_path):
-        log("未找到截图文件，跳过通知。", "WARN")
-        return
-    url = f"https://api.telegram.org/bot{token}/sendPhoto"
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
     try:
-        with open(photo_path, "rb") as photo_file:
-            response = requests.post(
-                url,
-                data={"chat_id": chat_id, "caption": caption, "parse_mode": parse_mode},
-                files={"photo": photo_file},
-                timeout=30,
-            )
+        response = requests.post(
+            url,
+            json={
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": parse_mode,
+                "disable_web_page_preview": True,
+            },
+            timeout=30,
+        )
         response.raise_for_status()
-        log("Telegram 图片通知发送成功")
+        log("Telegram 文本汇总通知发送成功")
     except Exception as e:
-        log(f"Telegram 图片通知异常: {e}", "ERROR")
+        log(f"Telegram 通知发送异常: {e}", "ERROR")
 
 # ==============================================================================
 # 页面元素提取
@@ -83,7 +84,6 @@ def get_expire_time(page):
             return ele.text.strip()
     except Exception:
         pass
-    # 回退：源版的方式
     selectors = ['text:Expires in:', 'text:Deletes on:']
     for selector in selectors:
         try:
@@ -98,32 +98,8 @@ def get_expire_time(page):
             pass
     return "未知"
 
-# ==============================================================================
-# 构建通知
-# ==============================================================================
-def build_notification(success, url, server_name, old_expire, new_expire=None, failure_reason=""):
-    if success:
-        lines = [
-            "✅ 续订成功",
-            "",
-            f"服务器：{server_name}",
-            f"到期: {old_expire} -> {new_expire}",
-            f"URL: {url}",
-        ]
-    else:
-        lines = [
-            "❌ 续订失败",
-            "",
-            f"服务器：{server_name}",
-            f"URL: {url}",
-        ]
-        if failure_reason:
-            lines.append(f"失败原因: {failure_reason}")
-    lines.append("")
-    lines.append("Host2Play Auto Renew")
-    return "\n".join(lines)
-
 def capture_page_screenshot(page, file_name):
+    """仍保留本地截图用于 GitHub Actions 上传 artifact 排错"""
     try:
         page.get_screenshot(path=file_name)
         return file_name
@@ -466,7 +442,7 @@ def solve_recaptcha(page):
     raise RuntimeError("验证码达到最大尝试次数")
 
 # ==============================================================================
-# 单个 URL 续期流程（去掉 IP 预检，直接尝试 + 封锁换 IP）
+# 单个 URL 续期流程
 # ==============================================================================
 def renew_single_url(url):
     success = False
@@ -500,14 +476,13 @@ def renew_single_url(url):
                 co.set_argument('--window-size=1280,720')
                 co.set_argument('--log-level=3')
                 co.set_argument('--silent')
-                # 关键：每次用独立的用户数据目录，避免残留 cookie/指纹
+                
                 user_data_dir = tempfile.mkdtemp()
                 co.set_user_data_path(user_data_dir)
                 co.auto_port()
                 co.headless(False)
                 page = ChromiumPage(co)
 
-                # 反指纹注入
                 page.add_init_js("""
                     const getParameter = WebGLRenderingContext.prototype.getParameter;
                     WebGLRenderingContext.prototype.getParameter = function(parameter) {
@@ -528,7 +503,6 @@ def renew_single_url(url):
                 old_expire = get_expire_time(page)
                 log(f"服务器: {server_name}, 到期时间: {old_expire}")
 
-                # 清理遮挡广告
                 page.run_js("""
                     const cssSelectors = ['ins.adsbygoogle', 'iframe[src*="ads"]', '.modal-backdrop'];
                     cssSelectors.forEach(sel => {
@@ -541,7 +515,6 @@ def renew_single_url(url):
                     consent_btn.click()
                     time.sleep(3)
 
-                # 关键：积累真实的鼠标轨迹和滚动数据（源版有，新版删了）
                 for _ in range(3):
                     scroll_y = random.randint(200, 600)
                     page.scroll.down(scroll_y)
@@ -574,7 +547,6 @@ def renew_single_url(url):
                         renew_btn2.click(by_js=True)
                 time.sleep(random.uniform(7, 10))
 
-                # reCAPTCHA 破解
                 anchor_frame = find_recaptcha_frame(page, "anchor")
                 if not anchor_frame:
                     log("未检测到 reCAPTCHA，检查是否已直接成功")
@@ -667,24 +639,57 @@ def main():
         log("请在 RENEW_URLS 列表中添加续期链接", "ERROR")
         sys.exit(1)
 
+    results = []
     total_success = 0
+    total_count = len(RENEW_URLS)
+
     for idx, url in enumerate(RENEW_URLS, 1):
         log(f"{'#'*60}")
         log(f"处理第 {idx} 个链接: {url}")
         log(f"{'#'*60}")
 
-        success, server_name, old_expire, new_expire, screenshot, failure_reason = renew_single_url(url)
-
+        success, server_name, old_expire, new_expire, _, failure_reason = renew_single_url(url)
         if success:
-            caption = build_notification(True, url, server_name, old_expire, new_expire)
             total_success += 1
+
+        results.append({
+            "url": url,
+            "server_name": server_name,
+            "old_expire": old_expire,
+            "new_expire": new_expire,
+            "success": success,
+            "failure_reason": failure_reason,
+        })
+
+    # 构建统一汇总通知
+    header_status = "🎉" if total_success == total_count else ("⚠️" if total_success > 0 else "❌")
+    msg_lines = [
+        f"{header_status} <b>主人，Host2Play 自动续期任务已完成！</b>",
+        "",
+        f"📊 <b>执行统计</b>：共 <code>{total_count}</code> 台 | 成功 <code>{total_success}</code> 台 | 失败 <code>{total_count - total_success}</code> 台",
+        "──────────────────",
+    ]
+
+    for i, r in enumerate(results, 1):
+        server_title = html.escape(str(r["server_name"]))
+        msg_lines.append(f"🖥 <b>[{i}] {server_title}</b>")
+        if r["success"]:
+            msg_lines.append(f"  • 状态：✅ <b>续订成功</b>")
+            msg_lines.append(f"  • 到期：<code>{html.escape(str(r['old_expire']))}</code> ➔ <code>{html.escape(str(r['new_expire']))}</code>")
         else:
-            caption = build_notification(False, url, server_name, old_expire, failure_reason=failure_reason)
+            msg_lines.append(f"  • 状态：❌ <b>续订失败</b>")
+            msg_lines.append(f"  • 原到期：<code>{html.escape(str(r['old_expire']))}</code>")
+            msg_lines.append(f"  • 失败原因：<code>{html.escape(str(r['failure_reason'] or '未知原因'))}</code>")
+        msg_lines.append("")
 
-        send_tg_photo(tg_token, tg_chat_id, screenshot, caption, parse_mode='HTML')
+    msg_lines.append("🤖 <i>Host2Play 自动续期守护服务</i>")
+    summary_message = "\n".join(msg_lines)
 
-    log(f"全部完成，成功 {total_success}/{len(RENEW_URLS)} 个链接")
-    if total_success < len(RENEW_URLS):
+    # 发送汇总文本消息
+    send_tg_message(tg_token, tg_chat_id, summary_message, parse_mode='HTML')
+
+    log(f"全部完成，成功 {total_success}/{total_count} 个链接")
+    if total_success < total_count:
         sys.exit(1)
 
 if __name__ == "__main__":
